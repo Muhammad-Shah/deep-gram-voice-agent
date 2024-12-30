@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Voice Agent</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .controls {
+            margin: 20px 0;
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+        }
+        button {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: all 0.3s ease;
+        }
+        button:hover {
+            transform: translateY(-2px);
+        }
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+        #startButton {
+            background-color: #4CAF50;
+            color: white;
+        }
+        #stopButton {
+            background-color: #f44336;
+            color: white;
+        }
+        .conversation {
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            min-height: 200px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .message {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .user-message {
+            background-color: #e3f2fd;
+            margin-right: 20%;
+        }
+        .agent-message {
+            background-color: #f5f5f5;
+            margin-left: 20%;
+        }
+        .status {
+            margin-top: 10px;
+            text-align: center;
+            color: #666;
+            font-weight: bold;
+        }
+        .volume-control {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .volume-control input {
+            width: 100px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 style="text-align: center;">Interactive Voice Agent</h1>
+        <div class="controls">
+            <button id="startButton">Start Recording</button>
+            <button id="stopButton" disabled>Stop Recording</button>
+        </div>
+        <div class="volume-control">
+            <label for="volume">Volume:</label>
+            <input type="range" id="volume" min="0" max="1" step="0.1" value="1">
+            <span id="volumeValue">100%</span>
+        </div>
+        <div class="status" id="status">Status: Ready</div>
+        <div class="conversation" id="conversation"></div>
+    </div>
+
+    <script>
+        let mediaRecorder;
+        let socket;
+        let audioChunks = [];
+        let speechSynthesis = window.speechSynthesis;
+        let speaking = false;
+        
+        const startButton = document.getElementById('startButton');
+        const stopButton = document.getElementById('stopButton');
+        const status = document.getElementById('status');
+        const conversation = document.getElementById('conversation');
+        const volumeControl = document.getElementById('volume');
+        const volumeValue = document.getElementById('volumeValue');
+
+        // Volume control
+        volumeControl.addEventListener('input', (e) => {
+            const value = e.target.value;
+            volumeValue.textContent = Math.round(value * 100) + '%';
+        });
+
+        function addMessage(text, isUser = true) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${isUser ? 'user-message' : 'agent-message'}`;
+            messageDiv.textContent = text;
+            conversation.appendChild(messageDiv);
+            conversation.scrollTop = conversation.scrollHeight;
+        }
+
+        function speak(text) {
+            if (speaking) {
+                speechSynthesis.cancel();
+            }
+            
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.volume = volumeControl.value;
+            
+            utterance.onstart = () => {
+                speaking = true;
+            };
+            
+            utterance.onend = () => {
+                speaking = false;
+            };
+            
+            speechSynthesis.speak(utterance);
+        }
+
+        startButton.onclick = async () => {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                socket = new WebSocket('ws://localhost:8000/ws');
+
+                socket.onopen = () => {
+                    status.textContent = 'Status: Connected';
+                    startButton.disabled = true;
+                    stopButton.disabled = false;
+                };
+
+                socket.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'transcript') {
+                        // Add user's message
+                        addMessage(data.text, true);
+                        
+                        // Add and speak agent's response
+                        if (data.response) {
+                            addMessage(data.response, false);
+                            speak(data.response);
+                        }
+                    }
+                };
+
+                socket.onclose = () => {
+                    status.textContent = 'Status: Disconnected';
+                    startButton.disabled = false;
+                    stopButton.disabled = true;
+                };
+
+                mediaRecorder.ondataavailable = (event) => {
+                    if (event.data.size > 0 && socket.readyState === WebSocket.OPEN) {
+                        socket.send(event.data);
+                    }
+                };
+
+                mediaRecorder.start(250);
+                status.textContent = 'Status: Recording';
+                conversation.innerHTML = ''; // Clear previous conversation
+            } catch (error) {
+                console.error('Error:', error);
+                status.textContent = 'Status: Error - ' + error.message;
+            }
+        };
+
+        stopButton.onclick = () => {
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+                mediaRecorder.stream.getTracks().forEach(track => track.stop());
+            }
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.close();
+            }
+            if (speaking) {
+                speechSynthesis.cancel();
+            }
+            startButton.disabled = false;
+            stopButton.disabled = true;
+            status.textContent = 'Status: Ready';
+        };
+    </script>
+</body>
+</html> 
