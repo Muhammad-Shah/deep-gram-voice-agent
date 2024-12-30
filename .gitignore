@@ -152,10 +152,11 @@ diana/
 .mypy_cache/
 .dmypy.json
 dmypy.json
+.env
 
 # Pyre type checker
 .pyre/
-
+consolidated_files.txt
 # pytype static type analyzer
 .pytype/
 

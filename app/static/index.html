@@ -163,18 +163,21 @@
                     stopButton.disabled = false;
                 };
 
-                socket.onmessage = (event) => {
-                    const data = JSON.parse(event.data);
-                    if (data.type === 'transcript') {
-                        // Add user's message
-                        addMessage(data.text, true);
-                        
-                        // Add and speak agent's response
-                        if (data.response) {
-                            addMessage(data.response, false);
-                            speak(data.response);
-                        }
-                    }
+                socket.onmessage = async (event) => {
+                const data = JSON.parse(event.data);
+                if (data.type === 'response') {
+                    // Add agent's response text
+                    addMessage(data.text, false);
+                    
+                    // Handle audio response
+                    const audioData = data.audio;
+                    const audioBlob = new Blob([Uint8Array.from(atob(audioData), c => c.charCodeAt(0))], 
+                                            { type: 'audio/wav' });
+                    const audioUrl = URL.createObjectURL(audioBlob);
+                    const audio = new Audio(audioUrl);
+                    audio.volume = volumeControl.value;
+                    audio.play();
+                }
                 };
 
                 socket.onclose = () => {
