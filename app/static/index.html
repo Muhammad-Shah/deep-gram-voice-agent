@@ -163,40 +163,34 @@
                     stopButton.disabled = false;
                 };
 
-                socket.onmessage = async (event) => {
-                const data = JSON.parse(event.data);
-                if (data.type === 'response') {
-                    // Add agent's response text
-                    addMessage(data.text, false);
-                    
-                    // Handle audio response
-                    const audioData = data.audio;
-                    const audioBlob = new Blob([Uint8Array.from(atob(audioData), c => c.charCodeAt(0))], 
-                                            { type: 'audio/wav' });
-                    const audioUrl = URL.createObjectURL(audioBlob);
-                    const audio = new Audio(audioUrl);
-                    audio.volume = volumeControl.value;
-                    audio.play();
-                }
-                };
-
-                socket.onclose = () => {
-                    status.textContent = 'Status: Disconnected';
-                    startButton.disabled = false;
-                    stopButton.disabled = true;
+                socket.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'transcript') {
+                        // Add user's message
+                        addMessage(data.text, true);
+                        
+                        // Add and speak agent's response
+                        if (data.response) {
+                            addMessage(data.response, false);
+                            speak(data.response);
+                        }
+                    }
                 };
 
                 mediaRecorder.ondataavailable = (event) => {
                     if (event.data.size > 0 && socket.readyState === WebSocket.OPEN) {
-                        socket.send(event.data);
+                        const reader = new FileReader();
+                        reader.onload = () => {
+                            const arrayBuffer = reader.result; // This is an ArrayBuffer
+                            socket.send(arrayBuffer); // Send the ArrayBuffer
+                        };
+                        reader.readAsArrayBuffer(event.data); // Read the Blob as ArrayBuffer
                     }
                 };
 
-                mediaRecorder.start(250);
-                status.textContent = 'Status: Recording';
-                conversation.innerHTML = ''; // Clear previous conversation
+                mediaRecorder.start(250); // Start recording with a specified time slice
             } catch (error) {
-                console.error('Error:', error);
+                console.error('Error accessing media devices.', error);
                 status.textContent = 'Status: Error - ' + error.message;
             }
         };
@@ -208,9 +202,6 @@
             }
             if (socket && socket.readyState === WebSocket.OPEN) {
                 socket.close();
-            }
-            if (speaking) {
-                speechSynthesis.cancel();
             }
             startButton.disabled = false;
             stopButton.disabled = true;
